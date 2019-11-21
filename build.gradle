@@ -1,0 +1,28 @@
+plugins {
+    id 'application'
+}
+
+sourceCompatibility = 8
+
+application {
+    mainClassName = 'fr.labri.popsycle.ui.PopsycleUI'
+    applicationDefaultJvmArgs = ['-XstartOnFirstThread']
+}
+
+repositories {
+    mavenCentral()
+    flatDir {
+        dirs 'libs'
+    }
+}
+
+dependencies {
+    implementation 'org.apache.bcel:bcel:6.4.1'
+    implementation 'com.github.mpkorstanje:simmetrics-core:4.1.1'
+    implementation name : 'org.eclipse.draw2d_3.7.1.v20110830-1143'
+    implementation name : 'org.eclipse.gef_3.7.1.v20110830-1143'
+    implementation name : 'org.eclipse.zest.core_1.3.0.v20110221-2050'
+    implementation name : 'org.eclipse.zest.layouts_1.1.0.v20110425-2050'
+    implementation name : 'swt'
+    testImplementation 'junit:junit:4.12'
+}
