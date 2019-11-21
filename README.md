@@ -2,6 +2,10 @@
 
 A neat tool to uncover cycles between packages in your Java project.
 
+## Status
+
+* Master branch: ![Build Status](https://travis-ci.org/jrfaller/popsycle.svg?branch=master)
+
 ## Installation
 
 You have to install popsycle from the source. After having cloned the repository, please 
