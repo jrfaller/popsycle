@@ -31,11 +31,9 @@ import fr.labri.popsycle.model.JPackageDep;
 import fr.labri.popsycle.model.JPackageGroup;
 
 public class Dijkstra {
-
 	private Map<JPackage,Integer> distMap;
-
 	private Map<JPackage,JPackage> previousMap;
-	
+
 	private JPackageGroup pkgGrp;
 	
 	public Dijkstra(JPackageGroup pkgGrp) {
@@ -84,5 +82,4 @@ public class Dijkstra {
 			}
 		}
 	}
-
 }
