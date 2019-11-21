@@ -29,13 +29,11 @@ import java.util.Set;
 import fr.labri.popsycle.model.utils.JavaUtils;
 
 public class JClassGroup {
-
 	private Set<JClass> classes;
 
 	public JClassGroup() {
-		this.classes = new HashSet<JClass>();
+		this.classes = new HashSet<>();
 	}
-
 	public JClassGroup(Collection<JClass> classes) {
 		this();
 		this.classes.addAll(classes);
@@ -97,7 +95,13 @@ public class JClassGroup {
 	}
 	
 	public String toString() {
-		return "ClassGroup with " + classes.size() + " and " + getJClassDepsNb() + " dependencies.";
+		StringBuilder b = new StringBuilder();
+		b.append(String.format("Class group with %d classes and  %d dependencies.\n", this.getJClassesNb(), this.getJClassDepsNb()));
+		for ( JClass cls: classes ) {
+			b.append(cls.getName() + "\n");
+			for ( JClassDep dep: cls.getJClassDeps() )
+				b.append(String.format("\t%s (%s)\n", dep.getTarget().getName(), dep.getWorseDepKind()));
+		}
+		return b.toString();
 	}
-	
 }

@@ -19,211 +19,142 @@
 package fr.labri.popsycle.io;
 
 import fr.labri.popsycle.model.JClass;
-import fr.labri.popsycle.model.JClassDep;
 import fr.labri.popsycle.model.JClassGroup;
 import fr.labri.popsycle.model.JDepKind;
-import fr.labri.popsycle.model.utils.JavaUtils;
-import org.apache.bcel.classfile.*;
-import org.apache.bcel.generic.Type;
+import spoon.Launcher;
+import spoon.reflect.CtModel;
+import spoon.reflect.declaration.*;
+import spoon.reflect.reference.CtTypeReference;
+import spoon.reflect.visitor.filter.AbstractFilter;
 
-import java.io.*;
-import java.util.Enumeration;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.Map;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipFile;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 public class SpoonReader extends JClassGroupReader {
+	private String[] srcPaths;
 
-	private static final String[] ZIP_FILE_TYPES = new String[] {".zip", ".jar", ".war", ".ear"};
+	private Set<String> managedTypeNames = new HashSet<>();
+	private CtModel model;
 
-	private String[] resources;
-
-	private Map<String,JClass> unresolvedClassesMap;
-
-	public SpoonReader(String[] resources) {
+	public SpoonReader(String[] srcPaths) {
 		super();
-		this.resources = resources;
+		this.srcPaths = srcPaths;
 	}
 
 	public JClassGroup read() {
 		reset();
-		try {
-			readResources();
-		}
-		catch (IOException e) {
-			e.printStackTrace();
-		}
-		catch (ClassNotFoundException e) {
-			e.printStackTrace();
-		}
-		resolveClasses();
+		readResources();
 		return new JClassGroup(classes);
 	}
 	
 	protected void reset() {
 		super.reset();
-		this.unresolvedClassesMap = new HashMap<String, JClass>();
+		this.managedTypeNames = new HashSet<>();
 	}
 
-	private void resolveClasses() {
-		for( JClass cls: classes ) {
-			Iterator<JClassDep> depIt = cls.getJClassDeps().iterator();
-			while ( depIt.hasNext() ) {
-				JClassDep dep = depIt.next();
-				String clsName = dep.getTarget().getName();
-				if ( namesMap.containsKey(clsName) ) {
-					//System.out.println("Resolved: " + clsName);
-					dep.setTarget(namesMap.get(clsName));
-				}
-				else {
-					//System.out.println("Not resolved: " + clsName);
-					depIt.remove();
-				}
-			}
-		}
+	private void readResources() {
+		Launcher launcher = new Launcher();
+		for (String srcPath: srcPaths)
+			launcher.addInputResource(srcPath);
+		launcher.buildModel();
+		this.model = launcher.getModel();
+		scanModel(launcher.getModel());
 	}
-	
-	private void readResources() throws IOException, ClassFormatException, ClassNotFoundException {
-		for (int i = 0; i < resources.length; i++) {
-			String resource = resources[i];
-			File file = new File(resource);
-			if ( file.isDirectory() ) {
-				analyseClassFile(file, resource);
-				File[] files = file.listFiles( new FileFilter() {public boolean accept(File file){return isZipFile(file);}} );
-				for (int j = 0; j < files.length; j++) {
-					String source = createSourceName(resource, files[j].getName());
-					analyseClassFiles(new ZipFile(files[j].getAbsoluteFile()), source);
-				}
-			} 
-			else if (file.getName().endsWith(".class"))
-				analyseClassFile(file, null);
-			else if (isZipFile(file))
-				analyseClassFiles(new ZipFile(file.getAbsoluteFile()), resource);
-			else 
-				throw new IOException(resource + " is an invalid file.");
+
+	private void extractManagedTypes() {
+		for (CtType spType : model.getAllTypes())
+			managedTypeNames.add(spType.getQualifiedName());
+	}
+
+	private void scanModel(CtModel model) {
+		extractManagedTypes();
+
+		for (CtType spType : model.getAllTypes()) {
+			JClass klass = this.retrieveClass(spType.getQualifiedName());
+			extractInheritanceDependencies(klass, spType);
+			extractFieldDependencies(klass, spType);
+			extractMethodDependencies(klass, spType);
 		}
 	}
 
-	private void analyseClassFile(File file, String source) throws IOException, ClassFormatException, ClassNotFoundException {
-		if (file.isDirectory()) {
-			String[] files = file.list();
-			for (int i = 0; i < files.length; i++) {
-				File child = new File(file, files[i]);
-				if (child.isDirectory() || files[i].endsWith(".class"))
-					analyseClassFile(child, source);
-			}
-		} 
-		else 
-			createJClass(new FileInputStream(file),source);
+	private void extractInheritanceDependencies(JClass klass, CtType spType) {
+		extractDependency(klass, spType.getSuperclass(), JDepKind.INH);
+		for (CtTypeReference spItf : spType.getSuperInterfaces())
+			extractDependency(klass, spItf, JDepKind.INH);
 	}
 
-	private void analyseClassFiles(ZipFile zipFile, String source) throws IOException, ClassFormatException, ClassNotFoundException {
-		Enumeration<? extends ZipEntry> entries = zipFile.entries();
-		while ( entries.hasMoreElements() ) {
-			ZipEntry entry = entries.nextElement();
-			if (!entry.isDirectory() && entry.getName().endsWith(".class")) {
-				InputStream stream = zipFile.getInputStream(entry);
-				createJClass(stream,source);
-			}
+	private void extractFieldDependencies(JClass klass, CtType spType) {
+		List<CtField> publicFields = spType.filterChildren(new PublicFieldFilter()).list();
+		for (CtField publicField : publicFields)
+			extractDependency(klass, publicField.getType(), JDepKind.REF);
+
+		List<CtField> nonPublicFields = spType.filterChildren(new NonPublicFieldFilter()).list();
+		for (CtField nonPublicField : nonPublicFields)
+			extractDependency(klass, nonPublicField.getType(), JDepKind.REF);
+	}
+
+	private void extractMethodDependencies(JClass klass, CtType spType) {
+		List<CtMethod> publicMethods = spType.filterChildren(new PublicMethodFilter()).list();
+		for (CtMethod publicMethod : publicMethods) {
+			extractDependency(klass, publicMethod.getType(), JDepKind.ITF);
+			for (CtParameter param : (List<CtParameter>) publicMethod.getParameters())
+				extractDependency(klass, param.getType(), JDepKind.ITF);
+			if (publicMethod.getBody() != null )
+				for (CtTypeReference ref : publicMethod.getBody().getReferencedTypes())
+					extractDependency(klass, ref, JDepKind.REF);
+		}
+
+		List<CtMethod> nonPublicMethods = spType.filterChildren(new NonPublicMethodFilter()).list();
+		for (CtMethod nonPublicMethod : nonPublicMethods) {
+			extractDependency(klass, nonPublicMethod.getType(), JDepKind.REF);
+			for (CtParameter param : (List<CtParameter>) nonPublicMethod.getParameters())
+				extractDependency(klass, param.getType(), JDepKind.REF);
+			if (nonPublicMethod.getBody() != null)
+				for (CtTypeReference ref : nonPublicMethod.getBody().getReferencedTypes())
+					extractDependency(klass, ref, JDepKind.REF);
 		}
 	}
 
-	private void createJClass(InputStream stream,String source) throws ClassFormatException, IOException, ClassNotFoundException {
-		ClassParser p = new ClassParser(stream, source);
-		JavaClass c = p.parse();
-
-		String clsName = fixName(c.getClassName());
-
-		JClass cls = retrieveClass(clsName);
-		
-		if ( c.isInterface() ) {
-			cls.setInterface(true);
-		}
-		else if ( c.isAbstract() )
-			cls.setAbstract(true);
-
-		cls.handleJClassDep(retrieveUnresolvedClass(fixName(c.getSuperclassName())), JDepKind.INH);
-
-		for ( String itfName: c.getInterfaceNames() )
-			cls.handleJClassDep(retrieveUnresolvedClass(fixName(itfName)),JDepKind.INH);
-
-		for( Field f: c.getFields() ) {
-			String fldTypeName = fixName(f.getType().toString());
-			if (!clsName.equals(fldTypeName)) {
-				JDepKind depKind = JDepKind.ITF;
-				if (f.isPrivate())
-					depKind = JDepKind.REF;
-				cls.handleJClassDep(retrieveUnresolvedClass(fldTypeName), depKind);
-			}
-		}	
-
-		for( Method m: c.getMethods() ) {
-			JDepKind kind = JDepKind.ITF;
-			if (m.isPrivate())
-				kind = JDepKind.REF;
-			String mtdRetTypeName = fixName(m.getReturnType().toString());
-			if ( !clsName.equals(mtdRetTypeName) )
-				cls.handleJClassDep(retrieveUnresolvedClass(mtdRetTypeName),kind);
-
-			for (Type t: m.getArgumentTypes() ) {
-				String mtdParTypeName = fixName(t.toString());
-				if (!clsName.equals(mtdParTypeName))
-					cls.handleJClassDep(retrieveUnresolvedClass(mtdParTypeName),kind);
-			}
-		}
-		
-		ConstantPool cPool = c.getConstantPool();
-		for( int i = 0; i < cPool.getLength() ; i++ ) {
-			Constant cst = cPool.getConstant(i);
-			if ( cst != null ) {
-				if ( cst instanceof ConstantUtf8 || cst instanceof ConstantClass || cst instanceof ConstantString ) {
-					
-					String rawValue = "";
-					
-					if ( cst instanceof ConstantUtf8 )
-						rawValue = ((ConstantUtf8) cst).getBytes();
-					else if ( cst instanceof ConstantClass )
-						rawValue = ((ConstantClass) cst).getBytes(cPool);
-					else 
-						rawValue = ((ConstantString) cst).getBytes(cPool);
-					
-					for( String name: JavaUtils.fixUtf8ConstantValue(rawValue) ) {
-						name = JavaUtils.removeInnerClass(name);
-						cls.handleJClassDep(retrieveUnresolvedClass(name),JDepKind.REF);
-					}	
-				}
-			}
-		}
-
-	}
-	
-	private JClass retrieveUnresolvedClass(String name) {
-		if ( unresolvedClassesMap.containsKey(name) )
-			return unresolvedClassesMap.get(name);
-		else {
-			JClass cls = new JClass(name,null,false);
-			unresolvedClassesMap.put(name,cls);
-			return cls;
+	private void extractDependency(JClass klass, CtTypeReference spDependencyType, JDepKind dependencyKind) {
+		if (this.isManaged(spDependencyType)) {
+			JClass dependencyType = this.retrieveClass(spDependencyType.getQualifiedName());
+			klass.handleJClassDep(dependencyType, dependencyKind);
 		}
 	}
 
-	private static String fixName(String name) {
-		return name.replaceAll("\\$\\w*","");
+	private boolean isManaged(CtTypeReference ref) {
+		if (ref == null)
+			return false;
+
+		return managedTypeNames.contains(ref.getQualifiedName());
 	}
 
-	private static String createSourceName(String classFile, String name) {
-		return classFile + (classFile.endsWith(File.separator) ? name : File.separatorChar + name);
+	private static class PublicMethodFilter extends AbstractFilter<CtMethod> {
+		@Override
+		public boolean matches(CtMethod method) {
+			return method.getModifiers().contains(ModifierKind.PUBLIC);
+		}
 	}
 
-	private static boolean isZipFile(File file) {
-		String name = file.getName();
-		for (int i = 0; i < ZIP_FILE_TYPES.length; i++) 
-			if (name.endsWith(ZIP_FILE_TYPES[i]))
-				return true;
-
-		return false;
+	private static class NonPublicMethodFilter extends AbstractFilter<CtMethod> {
+		@Override
+		public boolean matches(CtMethod method) {
+			return !method.getModifiers().contains(ModifierKind.PUBLIC);
+		}
 	}
 
+	private static class PublicFieldFilter extends AbstractFilter<CtField> {
+		@Override
+		public boolean matches(CtField field) {
+			return field.getModifiers().contains(ModifierKind.PUBLIC);
+		}
+	}
+
+	private static class NonPublicFieldFilter extends AbstractFilter<CtField> {
+		@Override
+		public boolean matches(CtField field) {
+			return !field.getModifiers().contains(ModifierKind.PUBLIC);
+		}
+	}
 }

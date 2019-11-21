@@ -19,6 +19,8 @@ repositories {
 dependencies {
     implementation 'org.apache.bcel:bcel:6.4.1'
     implementation 'com.github.mpkorstanje:simmetrics-core:4.1.1'
+    implementation 'fr.inria.gforge.spoon:spoon-core:8.0.0'
+
     implementation name : 'org.eclipse.draw2d_3.7.1.v20110830-1143'
     implementation name : 'org.eclipse.gef_3.7.1.v20110830-1143'
     implementation name : 'org.eclipse.zest.core_1.3.0.v20110221-2050'
