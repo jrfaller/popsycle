@@ -2,7 +2,7 @@ plugins {
     id 'application'
 }
 
-sourceCompatibility = 8
+sourceCompatibility = 9
 
 application {
     mainClassName = 'fr.labri.popsycle.ui.PopsycleUI'
